@@ -15,7 +15,11 @@
   th { background: #f0f0f0; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   a.button, button { display: inline-block; padding: .5rem 1.2rem; font-size: 1rem;
-         background: #176f2c; color: #fff; border-radius: 6px; text-decoration: none; }
+         background: #176f2c; color: #fff; border: 0; border-radius: 6px; text-decoration: none; }
+  textarea { width: 100%; box-sizing: border-box; padding: .4rem .6rem; min-height: 5rem;
+         font: ui-monospace, monospace; font-size: .85rem; border: 1px solid #ccc; border-radius: 4px; }
+  label { display: block; margin: .6rem 0 .2rem; font-weight: 600; }
+  .muted { color: #666; font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -26,7 +30,7 @@
   露出总面积 {{ report.total_exposed }} 像素²，
   缺许可面积
   {% if report.clean %}
-    <span class="ok">0 —— 整页无缺口 ✓</span>
+    <span class="ok">0 —— 整页无缺口 ✓，可通过下方登记。</span>
   {% else %}
     <span class="bad">{{ report.total_unlicensed }} 像素² —— 存在未获许可的露出 ✗</span>
   {% endif %}
@@ -60,11 +64,30 @@
 <div class="card">
   {% if token %}
     <a class="button" href="/download/{{ token }}">下载署名 CSV</a>
-    <p>仅列出实际露出的原片编号与署名。</p>
+    <p class="muted">仅列出实际露出的原片编号与署名。</p>
   {% else %}
     <p class="bad">存在缺许可的露出，无法下载署名 CSV。请先解决上方列出的缺口。</p>
   {% endif %}
-  <p><a href="/">← 重新上传</a></p>
 </div>
+
+{% if report.clean %}
+<div class="card">
+<h2 style="font-size:1.1rem">登记这份送印稿</h2>
+<p class="muted">登记时按页面所见稿次校验：换稿若与他人提交冲突会被拒绝，当前稿保持不变。</p>
+<form action="/register" method="post">
+  <label>展板编号</label>
+  <input type="text" name="board_id" placeholder="例如 B-12" required
+         style="width:100%;box-sizing:border-box;padding:.4rem .6rem;font:inherit;
+                border:1px solid #ccc;border-radius:4px">
+  <p class="muted">该展板若尚未登记，将登记为稿次 1；已有登记请到
+    <a href="/">首页</a>按正确稿次换稿。</p>
+  <input type="hidden" name="expected_version" value="0">
+  <input type="hidden" name="json_text" value="{{ json_text }}">
+  <div style="margin-top:1rem"><button type="submit">登记为稿次 1</button></div>
+</form>
+</div>
+{% endif %}
+
+<p><a href="/">← 返回首页</a></p>
 </body>
 </html>

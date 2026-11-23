@@ -43,6 +43,20 @@ def clip(rect, bounds):
     return (nx0, ny0, nx1, ny1)
 
 
+def intersect(a, b):
+    """两个半开矩形的交集；仅边缘相碰（面积为 0）时返回 None。"""
+    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+    if x0 >= x1 or y0 >= y1:
+        return None
+    return (x0, y0, x1, y1)
+
+
+def parse_rect(d, name="矩形"):
+    """公开的矩形解析入口，供登记/反查表单复用。"""
+    return _parse_rect(d, name)
+
+
 def subtract(rect, hole):
     """rect 减去 hole，返回互不重叠的矩形列表（0~4 个）。"""
     x0, y0, x1, y1 = rect
@@ -164,11 +178,12 @@ def parse_input(data):
     return board, photos, pieces
 
 
-def analyze(data):
-    """返回核查报告字典。"""
-    board, photos, pieces = parse_input(data)
+def _visible_by_piece(board, pieces, max_parts_per_piece=None):
+    """返回 (board_rects, visible)。
 
-    # 每片在展板上的落版矩形（裁片按原尺寸铺放），并裁剪到展板内
+    board_rects[i]：第 i 片裁剪到展板内的落版矩形（可能为 None）。
+    visible[i]：第 i 片实际露出的矩形列表（展板坐标）。
+    """
     board_rects = []
     for pc in pieces:
         cx0, cy0, cx1, cy1 = pc["crop"]
@@ -184,9 +199,16 @@ def analyze(data):
             visible[i] = []
             continue
         visible[i] = subtract_many(r, covered)
+        if (max_parts_per_piece is not None
+                and len(visible[i]) > max_parts_per_piece):
+            raise IndexTooLarge(
+                f"第 {i + 1} 片露出过于零碎（超过 {max_parts_per_piece} 个矩形）")
         covered.append(r)
+    return board_rects, visible
 
-    # 落版可见部分平移回原片坐标，按原片归集
+
+def _rows(photos, pieces, visible):
+    """按原片归集可见部分（平移回原片坐标），返回核查行。"""
     per_photo = defaultdict(list)
     for pc, vis in zip(pieces, visible):
         cx0, cy0 = pc["crop"][0], pc["crop"][1]
@@ -213,6 +235,18 @@ def analyze(data):
             "unlicensed": unlicensed,
             "point": point,
         })
+    return rows, total_unlicensed
+
+
+def analyze(data):
+    """返回核查报告字典。"""
+    board, photos, pieces = parse_input(data)
+    if len(pieces) > INDEX_MAX_PIECES:
+        raise IndexTooLarge(
+            f"裁片数量 {len(pieces)} 超过处理上限 {INDEX_MAX_PIECES}")
+    _, visible = _visible_by_piece(
+        board, pieces, max_parts_per_piece=INDEX_MAX_PARTS_PER_PIECE)
+    rows, total_unlicensed = _rows(photos, pieces, visible)
 
     clean = total_unlicensed == 0
     csv_text = None
@@ -235,4 +269,70 @@ def analyze(data):
         "total_unlicensed": total_unlicensed,
         "clean": clean,
         "csv": csv_text,
+    }
+
+
+class IndexTooLarge(ValueError):
+    """露出数据规模超出登记上限。"""
+
+
+INDEX_MAX_PIECES = 5000
+INDEX_MAX_PARTS_PER_PIECE = 20000
+INDEX_MAX_TOTAL_PARTS = 500000
+
+
+def build_snapshot(data, max_pieces=None, max_parts_per_piece=None,
+                   max_total_parts=None):
+    """生成登记用的送印稿快照。
+
+    返回按片保存的露出矩形（展板坐标），供反查直接使用；
+    不建立像素画布，规模只随露出矩形数量增长。
+
+    未通过刊用核查时 ``clean`` 为 False，调用方应拒绝登记。
+    """
+    board, photos, pieces = parse_input(data)
+
+    max_pieces = INDEX_MAX_PIECES if max_pieces is None else max_pieces
+    max_parts_per_piece = (INDEX_MAX_PARTS_PER_PIECE
+                           if max_parts_per_piece is None
+                           else max_parts_per_piece)
+    max_total_parts = (INDEX_MAX_TOTAL_PARTS if max_total_parts is None
+                       else max_total_parts)
+    if not pieces:
+        raise ValueError("pieces 不能为空，无法登记没有裁片的送印稿")
+    if len(pieces) > max_pieces:
+        raise IndexTooLarge(
+            f"裁片数量 {len(pieces)} 超过登记上限 {max_pieces}")
+
+    board_rects, visible = _visible_by_piece(
+        board, pieces, max_parts_per_piece=max_parts_per_piece)
+    rows, total_unlicensed = _rows(photos, pieces, visible)
+
+    total_parts = sum(len(parts) for parts in visible)
+    if total_parts > max_total_parts:
+        raise IndexTooLarge(
+            f"露出数据共 {total_parts} 个矩形，超过登记上限 {max_total_parts}")
+
+    credit_by_photo = {ph["id"]: ph["credit"] for ph in photos}
+    snap_pieces = []
+    for i, pc in enumerate(pieces):
+        snap_pieces.append({
+            "no": i + 1,
+            "photo": pc["photo"],
+            "credit": credit_by_photo[pc["photo"]],
+            "crop": list(pc["crop"]),
+            "at": list(pc["at"]),
+            "board_rect": list(board_rects[i]) if board_rects[i] else None,
+            "exposed": [list(r) for r in visible[i]],
+        })
+
+    return {
+        "board": {"width": board[2], "height": board[3]},
+        "photos": [{"id": ph["id"], "credit": ph["credit"],
+                    "permit": list(ph["permit"])} for ph in photos],
+        "pieces": snap_pieces,
+        "rows": rows,
+        "total_exposed": sum(r["exposed"] for r in rows),
+        "total_unlicensed": total_unlicensed,
+        "clean": total_unlicensed == 0,
     }

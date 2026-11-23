@@ -5,36 +5,130 @@
 <title>展板露出核查</title>
 <style>
   body { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
-         max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #222; }
   h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.15rem; }
   .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
   .error { background: #fdecea; border-color: #f5c6c0; color: #a33; }
+  .ok { color: #176f2c; font-weight: 600; }
+  .bad { color: #b3261e; font-weight: 600; }
+  .warn { color: #8a5a00; }
   code, pre { background: #f6f8fa; border-radius: 4px; }
   code { padding: 0 .3em; }
   pre { padding: .75rem; overflow-x: auto; font-size: .85rem; }
   button { padding: .5rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  label { display: block; margin: .6rem 0 .2rem; font-weight: 600; }
+  input[type=text], input[type=number], textarea {
+    width: 100%; box-sizing: border-box; padding: .4rem .6rem;
+    font: inherit; border: 1px solid #ccc; border-radius: 4px; }
+  textarea { min-height: 7rem; font-family: ui-monospace, monospace; font-size: .85rem; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem; }
   table { border-collapse: collapse; width: 100%; }
   th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
   th { background: #f0f0f0; }
-  .ok { color: #176f2c; font-weight: 600; }
-  .bad { color: #b3261e; font-weight: 600; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: #666; font-size: .9rem; }
 </style>
 </head>
 <body>
-<h1>展板露出核查</h1>
-<p>上传描述展板与裁片的 JSON，核查每幅原片在展板上露出的面积是否都在其可刊矩形内。</p>
+<h1>展板露出核查 · 送印稿登记与反查</h1>
 
 {% if error %}
 <div class="card error">{{ error }}</div>
 {% endif %}
 
+{% if store_error %}
+<div class="card error">{{ store_error }}（登记与反查暂不可用）</div>
+{% endif %}
+
+{% if saved %}
+<div class="card ok">已登记并生效：展板 {{ board }} 的稿次 {{ saved }}。</div>
+{% endif %}
+
 <div class="card">
-  <form action="/analyze" method="post" enctype="multipart/form-data">
-    <input type="file" name="file" accept=".json,application/json" required>
-    <button type="submit">核查</button>
-  </form>
-  <p><a href="/static/sample.json" download>下载示例 JSON</a></p>
+<h2>① 印厂反查：原片瑕疵影响哪些展板</h2>
+<form action="/lookup" method="post">
+  <label>原片编号</label>
+  <input type="text" name="photo_id" value="{{ lookup_photo or '' }}" required>
+  <label>原片上的瑕疵矩形（整数像素，左上原点，x 向右、y 向下）</label>
+  <div class="grid">
+    <input type="number" name="x" placeholder="x" step="1" required>
+    <input type="number" name="y" placeholder="y" step="1" required>
+    <input type="number" name="w" placeholder="宽 w" step="1" min="1" required>
+    <input type="number" name="h" placeholder="高 h" step="1" min="1" required>
+  </div>
+  <label>只查某展板（可留空，留空即查全部已登记展板）</label>
+  <input type="text" name="board_filter" value="">
+  <div style="margin-top:1rem"><button type="submit">反查受影响展板</button></div>
+</form>
+<p class="muted">结果逐处列出瑕疵在各展板内实际露出的落版矩形（展板坐标），
+并标明展板编号与稿次。边缘相碰、没有面积的略过。</p>
+</div>
+
+<div class="card">
+<h2>② 登记 / 换稿</h2>
+
+<h3 style="font-size:1rem;margin:.2rem 0 .6rem">a. 先做刊用核查</h3>
+<form action="/analyze" method="post">
+  <label>送印稿 JSON（内容须已通过刊用核查才可登记）</label>
+  <textarea name="json_text" placeholder='{"board": {...}, "photos": [...], "pieces": [...]}'>{{ json_text }}</textarea>
+  <div style="margin-top:.6rem"><button type="submit">刊用核查</button></div>
+</form>
+<p class="muted"><a href="/static/sample.json" download>下载示例 JSON</a></p>
+
+<h3 style="font-size:1rem;margin:1.4rem 0 .6rem">b. 按展板编号登记 / 换稿</h3>
+<form action="/register" method="post" enctype="multipart/form-data">
+  <label>展板编号</label>
+  <input type="text" name="board_id" value="{{ board_id }}" placeholder="例如 B-12" required>
+  <p class="muted">
+    {% if current_version and mode == 'stale' %}
+      当前已生效稿次为 <b>{{ current_version }}</b>；提交框中仍保留页面上次所见的
+      稿次 {{ expected_version or '0' }}。请
+      <a href="/?board={{ board_id | urlencode }}">载入最新稿次</a>
+      确认后再换稿；直接再次提交仍会被拒绝。
+    {% elif mode == 'edit' and current_version %}
+      当前页所见稿次：<b>{{ current_version }}</b>。
+      换稿提交后新稿次连同露出数据一起生效；若提交时已有更新的稿次，
+      本次提交会被拒绝并保留当前稿。
+    {% else %}
+      该展板尚未登记，将登记为稿次 1。
+    {% endif %}
+  </p>
+  <input type="hidden" name="expected_version" id="expected-version"
+         value="{{ expected_version }}">
+
+  <label>JSON 文件（需已通过刊用核查）</label>
+  <input type="file" name="file" accept=".json,application/json">
+  <label>或粘贴 JSON</label>
+  <textarea name="json_text" placeholder='{"board": {...}, "photos": [...], "pieces": [...]}'>{{ json_text }}</textarea>
+
+  <div style="margin-top:1rem"><button type="submit">提交登记</button></div>
+</form>
+</div>
+
+<div class="card">
+<h2>③ 已生效的送印稿</h2>
+{% if summaries %}
+<table>
+  <thead><tr><th>展板编号</th><th>稿次</th><th>裁片</th><th>原片</th>
+    <th class="num">露出面积 (px²)</th><th>生效时间 (UTC)</th><th></th></tr></thead>
+  <tbody>
+  {% for s in summaries %}
+    <tr>
+      <td>{{ s.board }}</td>
+      <td>{{ s.version }}</td>
+      <td class="num">{{ s.pieces }}</td>
+      <td class="num">{{ s.photos }}</td>
+      <td class="num">{{ s.exposed }}</td>
+      <td>{{ s.updated_at }}</td>
+      <td><a href="/?board={{ s.board | urlencode }}">换稿</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="muted">尚无登记。</p>
+{% endif %}
 </div>
 
 <div class="card">
@@ -53,8 +147,8 @@
 }</pre>
 <ul>
   <li>所有坐标均为整数像素；裁片按原尺寸铺放、互不透明。</li>
-  <li>只统计展板范围内、且未被上层裁片遮住的部分；同一原片多处露出重叠时只计一次。</li>
-  <li>整页无缺口（露出均在可刊矩形内）时才可下载署名 CSV。</li>
+  <li>登记时按送印稿计算出各片实际露出的落版矩形并随稿生效；未通过刊用核查（有缺许可露出）的稿不能登记。</li>
+  <li>反查只使用登记时生成的露出数据，不建立像素画布，内存与展板像素尺寸无关。</li>
 </ul>
 </div>
 </body>

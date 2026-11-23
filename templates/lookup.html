@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>瑕疵反查结果</title>
+<style>
+  body { font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .muted { color: #666; font-size: .9rem; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #ddd; padding: .4rem .6rem; text-align: left; }
+  th { background: #f0f0f0; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .ok { color: #176f2c; font-weight: 600; }
+</style>
+</head>
+<body>
+<h1>瑕疵反查结果</h1>
+
+{% if error %}
+<div class="card error">{{ error }}</div>
+<form action="/lookup" method="post">
+  <label>原片编号</label>
+  <input type="text" name="photo_id" value="{{ photo_id }}" required>
+  <label>原片上的瑕疵矩形（整数像素）</label>
+  <div class="grid">
+    <input type="number" name="x" value="{{ raw.x }}" step="1" required>
+    <input type="number" name="y" value="{{ raw.y }}" step="1" required>
+    <input type="number" name="w" value="{{ raw.w }}" step="1" min="1" required>
+    <input type="number" name="h" value="{{ raw.h }}" step="1" min="1" required>
+  </div>
+  <label>只查某展板（可留空）</label>
+  <input type="text" name="board_filter" value="{{ board_filter }}">
+  <div style="margin-top:1rem"><button type="submit">反查受影响展板</button></div>
+</form>
+{% else %}
+<div class="card">
+  原片 <b>{{ photo_id }}</b> 上的瑕疵矩形
+  (x={{ defect[0] }}, y={{ defect[1] }}, w={{ defect[2] - defect[0] }},
+  h={{ defect[3] - defect[1] }})；
+  {% if board_filter %}仅查展板 <b>{{ board_filter }}</b>。{% endif %}
+  <p class="muted">命中 {{ hits | length }} 处。
+    结果依据查询开始时已生效的稿次：{% for v in versions %}{{ v.board }} 稿次 {{ v.version }}{% if not loop.last %}、{% endif %}{% endfor %}
+    {% if not versions %}（无已登记展板）{% endif %}。</p>
+</div>
+
+{% if hits %}
+<table>
+  <thead><tr><th>展板编号</th><th>稿次</th><th>片号</th>
+    <th>展板内落版矩形 (x, y, w, h)</th></tr></thead>
+  <tbody>
+  {% for h in hits %}
+    <tr>
+      <td>{{ h.board }}</td>
+      <td>{{ h.version }}</td>
+      <td class="num">{{ h.piece_no }}</td>
+      <td>({{ h.rect[0] }}, {{ h.rect[1] }}, {{ h.rect[2] - h.rect[0] }}, {{ h.rect[3] - h.rect[1] }})</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="card ok">
+  {% if not photo_known %}
+    该原片未出现在查询范围内的已登记送印稿中（可能编号有误，或相关展板尚未登记）。
+  {% else %}
+    瑕疵所在区域未在任何已登记展板上露出，无需补印。
+  {% endif %}
+</p>
+{% endif %}
+{% endif %}
+
+<p><a href="/">← 返回登记与反查</a></p>
+</body>
+</html>
